@@ -1,0 +1,160 @@
+<!-- public/index.html -->
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LoL Match-V5 Friends Leaderboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#0f1116; color:#fff; margin:0; padding:22px; }
+    h1 { margin:0 0 6px; }
+    .sub { color:#b7bcc7; margin:0 0 16px; }
+
+    .top { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+    button { border:0; border-radius:10px; padding:10px 12px; cursor:pointer; }
+    button:hover { opacity:0.9; }
+    .primary { background:#3b82f6; color:#fff; }
+
+    .pill { background:#1a1d25; padding:8px 12px; border-radius:999px; color:#c7cbe0; }
+    select, input {
+      margin-left:6px; background:#0f1116; color:#fff;
+      border:1px solid #2a2f3a; border-radius:8px; padding:6px 8px;
+    }
+
+    table { width:100%; border-collapse:collapse; background:#1a1d25; border-radius:14px; overflow:hidden; }
+    th, td { padding:12px 12px; border-bottom:1px solid #2a2f3a; text-align:left; }
+    th { color:#c7cbe0; font-weight:700; }
+    tr:last-child td { border-bottom:0; }
+
+    .rankNum { color:#9aa3b2; font-weight:700; width:50px; }
+    .id { font-weight:800; }
+    .muted { color:#9aa3b2; font-size:12px; }
+
+    .error { background:#2a1b1b; border:1px solid #5b2b2b; padding:12px; border-radius:12px; color:#ffb4b4; margin-bottom: 12px; }
+    .ok { background:#13221a; border:1px solid #1f3b2b; padding:12px; border-radius:12px; color:#b7f7c7; margin-bottom: 12px; }
+
+    .cached { color:#9aa3b2; font-size:12px; margin-left:8px; }
+    .up { color:#22c55e; font-weight:800; }
+    .down { color:#ef4444; font-weight:800; }
+    .flat { color:#c7cbe0; }
+  </style>
+</head>
+<body>
+  <h1>LoL Friends Leaderboard (Match-V5)</h1>
+  <p class="sub">Uses Match-V5 (PUUID) to rank friends by recent winrate + average KDA. No Summoner-V4 required.</p>
+
+  <div class="top">
+    <button class="primary" id="refreshBtn">Refresh now</button>
+
+    <span class="pill" id="status">Updated: —</span>
+
+    <span class="pill">
+      Games:
+      <select id="count">
+        <option value="5">5</option>
+        <option value="5" selected>10</option>
+        <option value="15">15</option>
+        <option value="20">20</option>
+      </select>
+    </span>
+
+    <span class="pill">
+      Auto-refresh:
+      <select id="interval">
+        <option value="0" selected>Off</option>
+        <option value="60">60s</option>
+        <option value="120">2 min</option>
+        <option value="300">5 min</option>
+      </select>
+    </span>
+  </div>
+
+  <div id="msg"></div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Player</th>
+        <th>Winrate</th>
+        <th>Games</th>
+        <th>Avg K / D / A</th>
+        <th>Most Played</th>
+        <th>Last Game</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <script>
+    const rows = document.getElementById("rows");
+    const status = document.getElementById("status");
+    const msg = document.getElementById("msg");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const intervalSelect = document.getElementById("interval");
+    const countSelect = document.getElementById("count");
+
+    function fmtTime(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      return d.toLocaleString();
+    }
+
+    function fmtKDA(p) {
+      return `${p.avgK} / ${p.avgD} / ${p.avgA}`;
+    }
+
+    async function load() {
+      msg.innerHTML = "";
+      rows.innerHTML = "";
+
+      const count = Number(countSelect.value);
+      const res = await fetch(`/api/match-leaderboard?count=${encodeURIComponent(count)}`);
+      const data = await res.json();
+
+      if (data.error) {
+        msg.innerHTML = `<div class="error">${data.error}</div>`;
+        return;
+      }
+
+      status.textContent = "Updated: " + new Date(data.updatedAt).toLocaleTimeString();
+
+      // Show note if any cached
+      const cachedAny = data.results.some(r => r.cached);
+      if (cachedAny) {
+        msg.innerHTML = `<div class="ok">Showing some cached results to avoid rate limits.</div>`;
+      }
+
+      rows.innerHTML = data.results.map((p, i) => `
+        <tr>
+          <td class="rankNum">${i + 1}</td>
+          <td>
+            <div class="id">${p.player}</div>
+            <div class="muted">${p.riotId || ""} ${p.cached ? '<span class="cached">(cached)</span>' : ""}</div>
+            ${p.error ? `<div class="muted" style="color:#ffb4b4;margin-top:6px;">${p.error}</div>` : ""}
+          </td>
+          <td>${p.error ? "—" : `${p.winrate}%`}</td>
+          <td>${p.error ? "—" : `${p.wins}-${(p.games - p.wins)} (${p.games})`}</td>
+          <td>${p.error ? "—" : fmtKDA(p)}</td>
+          <td>${p.error ? "—" : (p.mostPlayed || "—")}</td>
+          <td>${p.error ? "—" : fmtTime(p.lastGameStartISO)}</td>
+        </tr>
+      `).join("");
+    }
+
+    let timer = null;
+    function setAuto(seconds) {
+      if (timer) clearInterval(timer);
+      timer = null;
+      if (seconds > 0) timer = setInterval(load, seconds * 1000);
+    }
+
+    refreshBtn.addEventListener("click", load);
+    intervalSelect.addEventListener("change", () => setAuto(Number(intervalSelect.value)));
+    countSelect.addEventListener("change", load);
+
+    load();
+    setAuto(Number(intervalSelect.value));
+  </script>
+</body>
+</html>
